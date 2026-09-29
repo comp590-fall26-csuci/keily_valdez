@@ -1,2 +1,4 @@
 output/*
 !output/.gitkeep
+.venv/
+.DS_Store
