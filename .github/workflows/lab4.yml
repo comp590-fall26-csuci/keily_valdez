@@ -1,0 +1,27 @@
+name: lab4
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+    - name: build
+      run: make -C lab3
+    - name: run
+      run: make -C lab3 run | tee output.txt
+    - name: verify
+      run: |
+          grep -q "55" output.txt
+          grep -q "1.618034" output.txt
+    - name: clean
+      run: make -C lab3 clean
