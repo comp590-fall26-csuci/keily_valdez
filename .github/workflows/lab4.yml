@@ -25,3 +25,13 @@ jobs:
           grep -q "1.618034" output.txt
     - name: clean
       run: make -C lab3 clean
+
+  
+  semgrep:
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan with Semgrep
+        run: semgrep scan --config auto
