@@ -1,0 +1,30 @@
+name: lab5
+
+on:
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-22.04
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install and configure AFL++
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y afl++
+          sudo afl-system-config
+
+      - name: Build program
+        run: afl-clang-fast -O0 -g lab5/dvcp.c -o lab5/dvcp
+
+      - name: Create starting input
+        run: |
+          mkdir -p lab5/inputs
+          printf 'IMG' > lab5/inputs/seed
+
+      - name: Fuzz for three minutes
+        run: afl-fuzz -i lab5/inputs -o lab5/results -V 180 -- ./lab5/dvcp @@
