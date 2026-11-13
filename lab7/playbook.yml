@@ -1,0 +1,361 @@
+- name: Setup Gitea and Runner
+  hosts: webservers
+  become: true
+
+  vars_prompt:
+    - name: gitea_email
+      prompt: "Email for your Gitea account"
+      private: false
+
+    - name: gitea_password
+      prompt: "Choose a password for your Gitea account"
+      private: true
+      confirm: true
+
+  tasks:
+    - name: Update package list
+      apt:
+        update_cache: yes
+
+    - name: Install Git
+      apt:
+        name: git
+        state: present
+
+    - name: Install SQLite3
+      apt:
+        name: sqlite3
+        state: present
+
+    - name: Create Git group
+      group:
+        name: git
+        system: yes
+
+    - name: Create Git user for Gitea
+      user:
+        name: git
+        group: git
+        system: yes
+        shell: /bin/bash
+        home: /home/git
+        create_home: yes
+
+    - name: Download Gitea binary
+      get_url:
+        url: https://dl.gitea.com/gitea/28.3.0/gitea-28.3.0-linux-arm64
+        dest: /usr/local/bin/gitea
+        owner: root
+        group: root
+        mode: "0755"
+        checksum: sha256:https://dl.gitea.com/gitea/28.3.0/gitea-28.3.0-linux-arm64.sha256
+
+    - name: Create Gitea working folder
+      file:
+        path: /var/lib/gitea
+        state: directory
+        owner: git
+        group: git
+        mode: "0750"
+
+    - name: Create Gitea custom folder
+      file:
+        path: /var/lib/gitea/custom
+        state: directory
+        owner: git
+        group: git
+        mode: "0750"
+
+    - name: Create Gitea data folder
+      file:
+        path: /var/lib/gitea/data
+        state: directory
+        owner: git
+        group: git
+        mode: "0750"
+
+    - name: Create Gitea log folder
+      file:
+        path: /var/lib/gitea/log
+        state: directory
+        owner: git
+        group: git
+        mode: "0750"
+
+    - name: Create Gitea configuration folder
+      file:
+        path: /etc/gitea
+        state: directory
+        owner: root
+        group: git
+        mode: "0750"
+
+    - name: Generate Gitea secret key
+      command: /usr/local/bin/gitea generate secret SECRET_KEY
+      register: gitea_secret
+      changed_when: false
+      no_log: true
+
+    - name: Generate Gitea internal token
+      command: /usr/local/bin/gitea generate secret INTERNAL_TOKEN
+      register: gitea_token
+      changed_when: false
+      no_log: true
+
+    - name: Create Gitea configuration
+      copy:
+        dest: /etc/gitea/app.ini
+        owner: root
+        group: git
+        mode: "0640"
+        force: no
+        content: |
+          APP_NAME = Lab7 Gitea
+          RUN_USER = git
+          RUN_MODE = prod
+          WORK_PATH = /var/lib/gitea
+
+          [database]
+          DB_TYPE = sqlite3
+          PATH = /var/lib/gitea/data/gitea.db
+
+          [repository]
+          ROOT = /var/lib/gitea/data/gitea-repositories
+
+          [server]
+          DOMAIN = localhost
+          HTTP_ADDR = 127.0.0.1
+          HTTP_PORT = 3000
+          ROOT_URL = http://localhost:3000/
+          APP_DATA_PATH = /var/lib/gitea/data
+          DISABLE_SSH = true
+
+          [security]
+          INSTALL_LOCK = true
+          SECRET_KEY = {{ gitea_secret.stdout }}
+          INTERNAL_TOKEN = {{ gitea_token.stdout }}
+
+          [log]
+          MODE = console
+          LEVEL = info
+          ROOT_PATH = /var/lib/gitea/log
+
+          [actions]
+          ENABLED = true
+      no_log: true
+
+    - name: Generate and save OAuth2 secret
+      shell: |
+        umask 077
+        /usr/local/bin/gitea generate secret JWT_SECRET > /etc/gitea/oauth2_jwt_secret
+      args:
+        creates: /etc/gitea/oauth2_jwt_secret
+      no_log: true
+
+    - name: Set OAuth2 secret permissions
+      file:
+        path: /etc/gitea/oauth2_jwt_secret
+        owner: root
+        group: git
+        mode: "0640"
+
+    - name: Configure OAuth2 secret file
+      blockinfile:
+        path: /etc/gitea/app.ini
+        marker: "# {mark} ANSIBLE OAUTH2 SETTINGS"
+        block: |
+          [oauth2]
+          JWT_SIGNING_ALGORITHM = HS256
+          JWT_SECRET_URI = file:/etc/gitea/oauth2_jwt_secret
+
+    - name: Create Gitea service
+      copy:
+        dest: /etc/systemd/system/gitea.service
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Gitea
+          After=network.target
+
+          [Service]
+          Type=simple
+          User=git
+          Group=git
+          WorkingDirectory=/var/lib/gitea
+          Environment=HOME=/home/git
+          Environment=GITEA_WORK_DIR=/var/lib/gitea
+          ExecStart=/usr/local/bin/gitea web -c /etc/gitea/app.ini
+          Restart=on-failure
+          RestartSec=5
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start Gitea
+      systemd:
+        name: gitea
+        daemon_reload: yes
+        enabled: yes
+        state: started
+
+    - name: Download Gitea Runner binary
+      get_url:
+        url: https://dl.gitea.com/gitea-runner/5.2.0/gitea-runner-5.2.0-linux-arm64
+        dest: /usr/local/bin/gitea-runner
+        owner: root
+        group: root
+        mode: "0755"
+        checksum: sha256:https://dl.gitea.com/gitea-runner/5.2.0/gitea-runner-5.2.0-linux-arm64.sha256
+
+    - name: Create Runner group
+      group:
+        name: gitea-runner
+        system: yes
+
+    - name: Create Runner user
+      user:
+        name: gitea-runner
+        group: gitea-runner
+        system: yes
+        home: /var/lib/gitea-runner
+        create_home: yes
+        shell: /bin/bash
+        password_lock: yes
+
+    - name: Create Runner configuration folder
+      file:
+        path: /etc/gitea-runner
+        state: directory
+        owner: root
+        group: gitea-runner
+        mode: "0750"
+
+    - name: Create Runner configuration
+      copy:
+        dest: /etc/gitea-runner/config.yaml
+        owner: root
+        group: gitea-runner
+        mode: "0640"
+        content: |
+          log:
+            level: info
+
+          runner:
+            file: /var/lib/gitea-runner/.runner
+            capacity: 1
+            labels:
+              - "debian:host"
+
+          cache:
+            enabled: false
+
+    - name: Check whether Runner is already registered
+      stat:
+        path: /var/lib/gitea-runner/.runner
+      register: runner_registration
+
+    - name: Obtain Runner registration token
+      command: >-
+        runuser -u git --
+        /usr/local/bin/gitea
+        --work-path /var/lib/gitea
+        --config /etc/gitea/app.ini
+        actions generate-runner-token
+      register: runner_token
+      when: not runner_registration.stat.exists
+      no_log: true
+
+    - name: Register Runner with Gitea
+      command: >-
+        runuser -u gitea-runner --
+        /usr/local/bin/gitea-runner
+        --config /etc/gitea-runner/config.yaml
+        register
+        --no-interactive
+        --instance http://localhost:3000/
+        --name lab7-runner
+        --labels debian:host
+      args:
+        chdir: /var/lib/gitea-runner
+        creates: /var/lib/gitea-runner/.runner
+      environment:
+        GITEA_RUNNER_REGISTRATION_TOKEN: "{{ runner_token.stdout_lines[-1] | trim }}"
+      when: not runner_registration.stat.exists
+      no_log: true
+
+    - name: Protect Runner registration file
+      file:
+        path: /var/lib/gitea-runner/.runner
+        owner: gitea-runner
+        group: gitea-runner
+        mode: "0600"
+
+    - name: Create Runner service
+      copy:
+        dest: /etc/systemd/system/gitea-runner.service
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Gitea Actions Runner
+          After=network-online.target gitea.service
+          Wants=network-online.target gitea.service
+
+          [Service]
+          Type=simple
+          User=gitea-runner
+          Group=gitea-runner
+          WorkingDirectory=/var/lib/gitea-runner
+          Environment=HOME=/var/lib/gitea-runner
+          ExecStart=/usr/local/bin/gitea-runner daemon --config /etc/gitea-runner/config.yaml
+          Restart=on-failure
+          RestartSec=5
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start Runner
+      systemd:
+        name: gitea-runner
+        daemon_reload: yes
+        enabled: yes
+        state: started
+
+    - name: Check existing Gitea accounts
+      command: >-
+        runuser -u git --
+        /usr/local/bin/gitea
+        --work-path /var/lib/gitea
+        --config /etc/gitea/app.ini
+        admin user list
+      register: gitea_users
+      changed_when: false
+
+    - name: Create Keily Gitea administrator account
+      command:
+        argv:
+          - runuser
+          - -u
+          - git
+          - --
+          - /usr/local/bin/gitea
+          - --work-path
+          - /var/lib/gitea
+          - --config
+          - /etc/gitea/app.ini
+          - admin
+          - user
+          - create
+          - --username
+          - keily
+          - --email
+          - "{{ gitea_email }}"
+          - --password
+          - "{{ gitea_password }}"
+          - --admin
+          - --must-change-password=false
+      when: gitea_users.stdout is not search('(?m)^\d+\s+keily\s')
+      no_log: true
