@@ -1,0 +1,15 @@
+name: lab7
+
+on:
+  push:
+    branches: [ "lab7" ]
+
+jobs:
+  build:
+    runs-on: debian
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and run unit tests
+        run: make -C lab3 run
